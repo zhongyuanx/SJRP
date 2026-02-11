@@ -1,0 +1,33 @@
+{
+    "eqn_config": {
+        "dim": 1,
+        "r": 0.05,
+        "mu_file": "mu_1dim.csv",
+        "inventory_cost_file": "inventory_cost_1dim.csv",
+        "ordering_cost_file": "ordering_cost_1dim.csv",
+        "sigma_file": "sigma_1dim.csv"
+    },
+
+    "net_config": {
+        "scaling_factor": 1.0,
+        "network_width": 250,
+        "network_depth": 4,
+        "batch_size": 1250,
+        "num_iterations": 15000,
+        "time_horizon": 0.8,
+        "num_time_interval": 200,
+        "activation": "ELU",
+        "ordering_frequency_file": "RS_R_1dim.csv",
+        "order_up_to_vector_file": "QS_S_1dim.csv",
+        "penalty_schedule": [1e2, 1e4, 2e5],
+        "penalty_milestones": [0, 5000, 10000],
+        "learning_rate_schedule": [1e-3, 1e-4, 1e-5], 
+        "learning_rate_milestones": [0, 5000, 10000],
+        "lam_file": "lam_1dim.csv", 
+        "S_file": "S_1dim.csv",
+        "nu": 0.5,
+        "vnet_model_file": "model_weights/vnet_model.pth",
+        "znet_model_file": "model_weights/znet_model.pth",
+        "loss_history_file": "model_weights/loss_history.csv"
+    }
+}
