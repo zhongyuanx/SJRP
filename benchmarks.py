@@ -149,7 +149,7 @@ class BenchmarkPolicies:
 
         min_cost, S_opt = cost_opt[0], cost_opt[1]
         with open(self.rs_r_path, "w", newline="") as f:
-            csv.writer(f).writerow([R_opt])
+            csv.writer(f).writerow([self.weeks_per_year/R_opt])
         with open(self.rs_cost_path, "w", newline="") as f:
             csv.writer(f).writerow([min_cost])
         with open(self.rs_s_path, "w", newline="") as f:
