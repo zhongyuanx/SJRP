@@ -26,6 +26,7 @@
         "lam_file": "RS_R.csv", 
         "S_file": "QS_S.csv",
         "nu": 0.2,
+        "alpha": 0.4, 
         "vnet_model_file": "model_weights/vnet_model.pth",
         "znet_model_file": "model_weights/znet_model.pth",
         "loss_history_file": "model_weights/loss_history.csv"
