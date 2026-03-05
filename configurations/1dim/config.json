@@ -26,6 +26,7 @@
         "lam_file": "lam_1dim.csv", 
         "S_file": "S_1dim.csv",
         "nu": 0.5,
+        "alpha": 0.0,
         "vnet_model_file": "model_weights/vnet_model.pth",
         "znet_model_file": "model_weights/znet_model.pth",
         "loss_history_file": "model_weights/loss_history.csv"
