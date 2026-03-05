@@ -7,6 +7,7 @@ from networks import Vnet, Znet
 import csv
 import time
 import os
+from torch.distributions import Exponential
 
 torch.manual_seed(42)
 
@@ -76,6 +77,7 @@ class ImpulseControlSolver(object):
         # self.lam is the rate of ordering events per year.
         self.S = torch.tensor(pd.read_csv(S_path, header=None).values, dtype=torch.float32).to(self.device)
         self.nu = self.net_config.nu
+        self.alpha = self.net_config.alpha
         self.ln_mu = torch.log(self.S**2 / torch.sqrt((1.0 + self.nu**2) * self.S**2))
         self.ln_sigma = torch.sqrt(torch.log(torch.tensor(self.nu**2 + 1.0, device=self.device)))
 
@@ -123,6 +125,9 @@ class ImpulseControlSolver(object):
         dB = torch.randn(N, num_sample, self.dim, device=device, dtype=dtype) * self.sqrt_delta_t
         logZ = torch.randn(N, num_sample, self.dim, device=device, dtype=dtype)
         Z = torch.exp(self.ln_mu + self.ln_sigma * logZ)
+        zeta_rates = (self.lam/self.alpha/self.mu).squeeze(0)
+        zeta_dist = Exponential(zeta_rates)
+        zeta = zeta_dist.sample((N, num_sample))
 
         X = torch.empty(N + 1, num_sample, self.dim, dtype=dtype, device=device)
         dU = torch.empty(N, num_sample, self.dim, dtype=dtype, device=device)
@@ -131,7 +136,7 @@ class ImpulseControlSolver(object):
         Bern = torch.bernoulli(Bern_param).to(dtype=torch.int32)
 
         for n in range(N):
-            dU[n] = (Z[n] - X[n]).relu() * Bern[n][:, None]
+            dU[n] = torch.maximum(Z[n] - X[n], zeta[n]) * Bern[n][:, None]
             X[n + 1] = X[n] - self.mu * self.delta_t + self.sigma * dB[n] + dU[n]
 
         return X, dB, dU, Bern
@@ -160,9 +165,11 @@ class ImpulseControlSolver(object):
 
     def loss_function(self, Vnet, Znet, X, dU, dB, Bern, beta):
         ZN = self.eval_Z_over_grid(Znet, X[:-1])
-        V0 = Vnet(X[0]).squeeze(-1) 
+        V0 = Vnet(X[0]).squeeze(-1)
         VN = Vnet(X[-1]).squeeze(-1)
-        return torch.mean(-V0 + beta * (((V0 - self.discount_T * VN + (self.weights[:, None] * (self.sigma * ZN * dB).sum(dim=-1)).sum(dim=0) - self.inv_cost(X) - self.order_cost(dU, Bern)).relu()) ** 2))
+        v0_term = torch.mean(V0)
+        penalty_term = torch.mean(beta * (((V0 - self.discount_T * VN + (self.weights[:, None] * (self.sigma * ZN * dB).sum(dim=-1)).sum(dim=0) - self.inv_cost(X) - self.order_cost(dU, Bern)).relu()) ** 2))
+        return -v0_term + penalty_term, v0_term, penalty_term
 
     def train(self):
         vnet_model = Vnet(self.dim, self.network_depth, self.network_width).to(self.device)
@@ -179,11 +186,12 @@ class ImpulseControlSolver(object):
 
         optimizer = optim.Adam(list(vnet_model.parameters()) + list(znet_model.parameters()), lr=learning_rate)
         X0 = torch.zeros(self.batch_size, self.dim, device=self.device, dtype=torch.float32)
+        X0_val = torch.zeros(self.batch_size, self.dim, device=self.device, dtype=torch.float32)
         loss_history = []
         start_time = time.perf_counter()
         for iteration in range(self.num_iterations):
             X, dB, dU, Bern = self.sample_generation(X0)
-            loss = self.loss_function(vnet_model, znet_model, X, dU, dB, Bern, penalty)
+            loss, v0_term, penalty_term = self.loss_function(vnet_model, znet_model, X, dU, dB, Bern, penalty)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -196,11 +204,15 @@ class ImpulseControlSolver(object):
             if torch.any(penalty_milestones == iteration):
                 penalty = penalty_schedule[torch.where(penalty_milestones == iteration)].item()
             X0 = X[-1]
+            X_val, dB_val, dU_val, Bern_val = self.sample_generation(X0_val)
+            X0_val = X_val[-1]
             if iteration % 1000 == 0:
+                with torch.no_grad():
+                    val_loss, val_v0_term, val_penalty_term = self.loss_function(vnet_model, znet_model, X_val, dU_val, dB_val, Bern_val, penalty)
                 v0_input = torch.zeros(1, self.dim, device=self.device, dtype=torch.float32)
-                v0_val = vnet_model(v0_input).squeeze(-1).item()
-                print(f"Iteration {iteration}, Loss: {loss.item()}, V(0): {v0_val}, Elapsed time: {time.perf_counter() - start_time}")
-            loss_history.append([iteration, loss.item()])
+                v0_est = vnet_model(v0_input).squeeze(-1).item()
+                print(f"Iteration {iteration}, Loss: {loss.item()}, Val Loss: {val_loss.item()}, Val V0 term: {val_v0_term.item()}, Val Penalty term: {val_penalty_term.item()}, V(0): {v0_est}, Elapsed time: {time.perf_counter() - start_time}")
+            loss_history.append([iteration, loss.item(), v0_term.item(), penalty_term.item()])
         self.vnet_model = vnet_model
         self.znet_model = znet_model
         self.save_model(self.vnet_model, self.znet_model)
@@ -221,5 +233,5 @@ class ImpulseControlSolver(object):
         os.makedirs(os.path.dirname(self.net_config.loss_history_file), exist_ok=True)
         with open(self.net_config.loss_history_file, 'w') as f:
             writer = csv.writer(f)
-            writer.writerow(['Iteration', 'Loss'])
+            writer.writerow(['Iteration', 'Loss', 'V0_term', 'Penalty_term'])
             writer.writerows(loss_history)
